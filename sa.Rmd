@@ -1,0 +1,272 @@
+---
+title: "Sentimen analisis"
+author: "Fazri"
+date: "11/25/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## 1. Import library yang dibutuhkan
+```{r library}
+# Install
+#install.packages("tm")  # for text mining
+#install.packages("SnowballC") # for text stemming
+#install.packages("wordcloud") # word-cloud generator 
+#install.packages("RColorBrewer") # color palettes
+#install.packages("syuzhet") # for sentiment analysis
+#install.packages("ggplot2") # for plotting graphs
+# Load
+library("tm")
+library("SnowballC")
+library("wordcloud")
+library("RColorBrewer")
+library("syuzhet")
+library("NLP")
+library("shiny")
+library("tidyverse")
+library("ggplot2")
+library("plotly")
+```
+## 1. Import file
+```{r}
+reviews = read.csv("hasilReviewsGi.csv")
+reviews = reviews %>% select(content, score, reviewCreatedVersion, at)
+reviews = reviews %>% mutate(createdAt = format(as.Date(at), format='%Y-%m')) %>% select(content, score, reviewCreatedVersion, createdAt)
+str(reviews)
+```
+## 3. Data exploratory
+### 3.1. Rata rata score berdasarkan versi aplikasi
+```{r}
+reviews %>%
+  group_by(reviewCreatedVersion) %>%
+  summarise(avgScore=mean(score)) %>%
+  ggplot(aes(x=reviewCreatedVersion, y=avgScore)) + geom_col() + labs(x = "Versi Aplikasi", 
+                                                                      y = "Rata rata score", 
+                                                                      title = "Grafik rata rata score", 
+                                                                      subtitle = "Rata rata score berdasarkan versi aplikasi") + coord_flip()
+  
+```
+
+### 3.2. Rata rata score sejak bulan september hingga november 2021
+```{r}
+reviews %>%
+  group_by(createdAt) %>%
+  summarise(avgScore=mean(score)) %>%
+  ggplot(aes(x=createdAt, y=avgScore)) + geom_col() + labs(x = "Versi Aplikasi",
+                                                           y = "Rata rata score",
+                                                           title = "Grafik rata rata score",
+                                                           subtitle = "Rata rata score sejak bulan agustus hingga november")
+```
+## 4. Data cleansing
+```{r}
+cleansing = function(text){
+  text = text %>% 
+    tolower() %>% 
+    removeNumbers() %>% 
+    removeWords(stopwords(kind = "en")) %>% 
+    removePunctuation() %>% 
+    stripWhitespace() %>% 
+    stemDocument()
+}
+reviews$content = sapply(reviews$content, cleansing)
+head(reviews)
+```
+
+## 5. Text Analysis
+```{r}
+TextDoc <- Corpus(VectorSource(reviews$content))
+# Build a term-document matrix
+TextDoc_dtm <- TermDocumentMatrix(TextDoc)
+dtm_m <- as.matrix(TextDoc_dtm)
+# Sort by descearing value of frequency
+dtm_v <- sort(rowSums(dtm_m),decreasing=TRUE)
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+# Display the top 5 most frequent words
+head(dtm_d, 5)
+
+```
+
+### 5.1. Kata yang paling banyak muncul
+```{r}
+# Plot the most frequent words
+barplot(dtm_d[1:5,]$freq, las = 2, names.arg = dtm_d[1:5,]$word,
+        col ="lightgreen", main ="Top 5 most frequent words",
+        ylab = "Word frequencies")
+```
+
+### 5.2. Wordcloud kata yang paling banyak muncul
+```{r}
+#generate word cloud
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 5,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+## 6. Sentimen analysis
+```{r}
+# regular sentiment score using get_sentiment() function and method of your choice
+# please note that different methods may have different scales
+syuzhet_vector <- get_sentiment(reviews$content, method="syuzhet")
+# see the first row of the vector
+head(syuzhet_vector)
+# see summary statistics of the vector
+summary(syuzhet_vector)
+```
+
+### 6.1. Emotion classification
+```{r}
+# run nrc sentiment analysis to return data frame with each row classified as one of the following
+# emotions, rather than a score: 
+# anger, anticipation, disgust, fear, joy, sadness, surprise, trust 
+# It also counts the number of positive and negative emotions found in each row
+d<-get_nrc_sentiment(reviews$content)
+
+# head(d,10) - to see top 10 lines of the get_nrc_sentiment dataframe
+head (d,10)
+```
+
+### 6.2.Sentiment visualization
+```{r echo=FALSE}
+#transpose
+td<-data.frame(t(d))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+td_new <- data.frame(rowSums(td[2:253]))
+#Transformation and cleaning
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+```
+
+```{r}
+td_new2<-td_new[1:8,]
+#Plot One - count of words associated with each sentiment
+quickplot(sentiment, data=td_new2, weight=count, geom="bar", fill=sentiment, ylab="count")+ggtitle("Survey sentiments")
+```
+
+```{r}
+quickplot(sentiment, data=td_new[9:10,], weight=count, geom="bar", fill=sentiment, ylab="count")+ggtitle("Survey sentiments")
+```
+## 7. Shiny 
+```{r}
+option_parameter <- colnames(reviews)[-c(1, 2)]
+option_parameter
+```
+
+```{r ui}
+ui = navbarPage(
+  title = "Shini-box",
+  inverse = T,
+  tabPanel(
+    title = "Word Frequency",
+    fluidPage(
+  
+      fluidRow(
+        column(
+          4,
+          h3("Total Reviews"),
+          h4(strong(textOutput(outputId = "total_reviews")))
+        ),
+        column(
+          4,
+          h3("Positive Words"),
+          h4(strong(textOutput(outputId = "total_positive")))
+        ),
+        column(
+          4,
+          h3("Negative Words"),
+          h4(strong(textOutput(outputId = "total_negative")))
+        )
+      ),
+  
+      sidebarLayout(
+        sidebarPanel(
+          textInput(
+            inputId = "count",
+            label = "Word count",
+            value = "5"
+          )
+        ),
+        mainPanel(
+          plotlyOutput(outputId = "plot_word_freq", height = "700px")
+        )
+      )
+    )
+  ),
+  tabPanel(
+    title = "WordCloud",
+    fluidPage(
+      mainPanel(
+        h3("Words Cloud", align = "center"),
+        plotOutput(outputId = "plot_word_cloud", width = "100%"),
+      )
+    )
+  ),
+  tabPanel(
+    title = "Sentiment analysis",
+    fluidPage(
+      mainPanel(
+        h3("Sentiment", align = "center"),
+        plotOutput(outputId = "plot_sentiment", width = "100%")
+      )
+    )
+  )
+  
+  
+  
+)
+```
+
+```{r server}
+server = function(input, output, session){
+  output$total_reviews = renderText({
+    reviews %>% nrow()
+  })
+  output$total_positive = renderText({
+    td_new$count[10]
+  })
+  
+  output$total_negative = renderText({
+    td_new$count[9]
+  })
+  
+  plot_word_freq = reactive({
+    head(dtm_d, as.numeric(input$count) ) %>%
+      ggplot(aes(x = word, y = freq)) +
+        geom_bar(stat = "identity") +
+        coord_flip() +
+        labs(
+          x = "Words",
+          y = "Frequency",
+          title = "Word Frequency Graphic"
+        ) +
+        theme_light()
+  })
+  output$plot_word_freq = renderPlotly({
+    ggplotly(plot_word_freq())
+  })
+  
+  output$plot_word_cloud = renderPlot({
+    set.seed(1234)
+    wordcloud(words = dtm_d$word,
+              freq = dtm_d$freq, 
+              min.freq = 5,
+              max.words=100, 
+              random.order=FALSE, 
+              rot.per=0.40, 
+              colors=brewer.pal(8, "Dark2"),
+              scale = c(4,1)
+    )
+  })
+  
+  output$plot_sentiment = renderPlot({
+    quickplot(sentiment, data=td_new2, weight=count, geom="bar", fill=sentiment, ylab="count")
+  })
+}
+```
+
+```{r run-app}
+shinyApp(ui = ui, server = server)
+```
